@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Brightloop Subscription Management</title>
+<style>
+:root{color-scheme:light;--bg:#f4f6fb;--card:#fff;--tx:#172033;--mu:#667085;--ac:#5146e5;--bd:#e2e7f0;--danger:#b42318;--good:#067647}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1120px;margin:0 auto;padding:28px 20px}header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+h1{font-size:25px;margin:0}h2{font-size:18px;margin:0 0 16px}.muted{color:var(--mu);font-size:13px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:20px;margin-bottom:16px;box-shadow:0 2px 6px #10182808}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.metric{font-size:26px;font-weight:700;margin-top:5px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.stack{display:grid;gap:10px}.split{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+input,select,button{font:inherit;padding:10px 12px;border-radius:8px;border:1px solid var(--bd);background:#fff;color:var(--tx)}
+input,select{width:100%}button{width:auto;background:var(--ac);border:0;color:white;cursor:pointer;font-weight:600}button.secondary{background:#eef0ff;color:#3730a3}button.danger{background:#fff1f0;color:var(--danger)}button:disabled{opacity:.55;cursor:not-allowed}
+label{display:grid;gap:5px;font-size:13px;color:var(--mu)}form{display:grid;gap:10px}.notice{margin:10px 0;color:var(--danger);min-height:20px}.success{color:var(--good)}
+.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:620px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--bd);vertical-align:middle}th{font-size:12px;color:var(--mu);text-transform:uppercase;letter-spacing:.04em}
+.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{padding:7px 9px;font-size:12px}.pill{display:inline-block;padding:3px 8px;border-radius:99px;background:#eef0ff;color:#3730a3;font-size:12px}
+.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.empty{padding:20px;text-align:center;color:var(--mu)}
+@media(max-width:600px){main{padding:16px 12px}header{align-items:flex-start;gap:10px}h1{font-size:21px}}
+</style>
+</head>
+<body>
+<main>
+<header><div><h1>Brightloop</h1><div class="muted">Subscription management</div></div><div id="session-actions" hidden><span id="identity" class="muted"></span> <button class="secondary" onclick="logout()">Sign out</button></div></header>
+
+<section id="auth" class="card" style="max-width:460px;margin:8vh auto">
+  <div id="login-view">
+    <h2>Welcome back</h2><form onsubmit="login(event)">
+      <label>Email<input id="login-email" type="email" autocomplete="username" required></label>
+      <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
+      <button>Log in</button>
+    </form>
+    <p class="muted">New to Brightloop? <a href="#" onclick="showAuth('signup');return false">Create an account</a></p>
+    <p class="muted"><a href="#" onclick="showAuth('forgot');return false">Forgot password?</a></p>
+  </div>
+  <div id="signup-view" hidden>
+    <h2>Create your account</h2><form onsubmit="signup(event)">
+      <label>Name<input id="signup-name" autocomplete="name"></label>
+      <label>Email<input id="signup-email" type="email" autocomplete="email" required></label>
+      <label>Password<input id="signup-password" type="password" autocomplete="new-password" minlength="9" required></label>
+      <div class="muted">Use more than 8 characters, including uppercase, lowercase, and a special character.</div>
+      <button>Create account</button>
+    </form><p class="muted"><a href="#" onclick="showAuth('login');return false">Back to log in</a></p>
+  </div>
+  <div id="forgot-view" hidden>
+    <h2>Reset your password</h2><p class="muted">Enter the email address associated with your account.</p>
+    <form onsubmit="forgotPassword(event)"><label>Email<input id="forgot-email" type="email" required></label><button>Send reset link</button></form>
+    <p class="muted"><a href="#" onclick="showAuth('login');return false">Back to log in</a></p>
+  </div>
+  <div id="reset-view" hidden>
+    <h2>Choose a new password</h2>
+    <form onsubmit="resetPassword(event)"><label>New password<input id="reset-password" type="password" minlength="9" autocomplete="new-password" required></label>
+      <div class="muted">Use more than 8 characters, including uppercase, lowercase, and a special character.</div><button>Update password</button></form>
+  </div>
+  <div id="auth-message" class="notice" role="status"></div>
+</section>
+
+<section id="dashboard" hidden>
+  <div id="metrics" class="grid"></div>
+  <div id="customer-subscriptions" class="card" hidden></div>
+  <div id="customer-invoices" class="card" hidden></div>
+  <div id="staff-subscriptions" class="card" hidden></div>
+  <div id="staff-invoices" class="card" hidden></div>
+  <div id="admin-tools" class="card" hidden></div>
+</section>
+</main>
+<script>
+"use strict";
+let token = localStorage.getItem("brightloop_token");
+let me = null;
+const resetToken = new URLSearchParams(location.search).get("reset_token");
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+function showAuth(view) {
+  for (const name of ["login","signup","forgot","reset"]) $(`${name}-view`).hidden = name !== view;
+  $("auth-message").textContent = "";
+  $("auth-message").className = "notice";
+}
+async function api(path, options = {}) {
+  const headers = {...(options.body ? {"Content-Type":"application/json"} : {}), ...(token ? {Authorization:`Bearer ${token}`} : {}), ...(options.headers || {})};
+  const response = await fetch(path, {...options, headers});
+  const text = await response.text();
+  let data = null;
+  if (text) { try { data = JSON.parse(text); } catch { data = text; } }
+  if (!response.ok) throw new Error(typeof data === "object" && data ? data.detail || response.statusText : response.statusText);
+  return data;
+}
+function authMessage(message, success = false) {
+  $("auth-message").textContent = message;
+  $("auth-message").className = success ? "notice success" : "notice";
+}
+async function login(event) {
+  event.preventDefault();
+  try {
+    const result = await api("/auth/login", {method:"POST", body:JSON.stringify({email:$("login-email").value,password:$("login-password").value})});
+    token = result.access_token;
+    localStorage.setItem("brightloop_token", token);
+    await start();
+  } catch (error) { authMessage(error.message); }
+}
+async function signup(event) {
+  event.preventDefault();
+  try {
+    await api("/auth/signup", {method:"POST", body:JSON.stringify({name:$("signup-name").value,email:$("signup-email").value,password:$("signup-password").value})});
+    $("login-email").value = $("signup-email").value;
+    showAuth("login");
+    authMessage("Account created. You can now log in.", true);
+  } catch (error) { authMessage(error.message); }
+}
+async function forgotPassword(event) {
+  event.preventDefault();
+  try {
+    const result = await api("/auth/forgot", {method:"POST", body:JSON.stringify({email:$("forgot-email").value})});
+    authMessage(result.detail, true);
+  } catch (error) { authMessage(error.message); }
+}
+async function resetPassword(event) {
+  event.preventDefault();
+  try {
+    const result = await api("/auth/reset", {method:"POST", body:JSON.stringify({token:resetToken,password:$("reset-password").value})});
+    history.replaceState(null, "", location.pathname);
+    showAuth("login");
+    authMessage(result.detail + ". Please log in.", true);
+  } catch (error) { authMessage(error.message); }
+}
+function logout() {
+  localStorage.removeItem("brightloop_token");
+  token = null; me = null;
+  $("dashboard").hidden = true; $("session-actions").hidden = true; $("auth").hidden = false;
+  showAuth("login");
+}
+function table(headers, rows) {
+  if (!rows.length) return '<div class="empty">Nothing to show yet.</div>';
+  return `<div class="table-wrap"><table><thead><tr>${headers.map(x=>`<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
+}
+async function start() {
+  try {
+    me = await api("/auth/me");
+    $("auth").hidden = true; $("dashboard").hidden = false; $("session-actions").hidden = false;
+    $("identity").textContent = `${me.name || me.email} · ${me.role}`;
+    if (me.role === "customer") await loadCustomer();
+    else await loadStaff();
+  } catch (error) {
+    if (token) logout();
+    else authMessage(error.message);
+  }
+}
+async function loadCustomer() {
+  $("customer-subscriptions").hidden = false; $("customer-invoices").hidden = false;
+  $("staff-subscriptions").hidden = true; $("staff-invoices").hidden = true; $("admin-tools").hidden = true; $("metrics").innerHTML = "";
+  try {
+    const [subscriptions,invoices,plans,products,variants] = await Promise.all([api("/subscriptions"),api("/invoices"),api("/plans"),api("/products"),api("/variants")]);
+    const planById = Object.fromEntries(plans.map(p=>[p.id,p]));
+    const selectablePlans=plans.map(p=>`<option value="${p.id}">${esc(p.name)} · ${esc(p.price)} / ${esc(p.billing_period)}</option>`).join("");
+    const addonOptions=products.filter(p=>String(p.type).toLowerCase()==="addon").flatMap(p=>{
+      const options=variants.filter(v=>v.product_id===p.id);
+      return options.length?options.map(v=>`<option value="${p.id}:${v.id}">${esc(p.name)} · ${esc(v.attribute)}: ${esc(v.value)}</option>`):[`<option value="${p.id}:0">${esc(p.name)}</option>`];
+    }).join("");
+    const details=await Promise.all(subscriptions.map(s=>api(`/subscriptions/${s.id}`)));
+    const productById=Object.fromEntries(products.map(p=>[p.id,p]));
+    const variantById=Object.fromEntries(variants.map(v=>[v.id,v]));
+    $("customer-subscriptions").innerHTML = `<div class="section-title"><h2>Your subscriptions</h2></div><form class="row" onsubmit="requestSubscription(event)"><label>Start a subscription<select name="plan_id" required>${selectablePlans}</select></label><button ${plans.length?"":"disabled"}>Request plan</button></form><p class="muted">New requests are reviewed by the Brightloop team before activation.</p>` + table(
+      ["Subscription","Plan","Status","Next invoice","Manage","Add-ons"],
+      subscriptions.map((s,i)=>{
+        const addons=details[i].lines.filter(line=>String(productById[line.product_id]?.type).toLowerCase()==="addon");
+        const addonText=addons.map(line=>`${esc(productById[line.product_id]?.name||"Add-on")} × ${esc(line.quantity)} <button class="danger" onclick="removeAddon(${s.id},${line.id})">Remove</button>`).join("<br>")||'<span class="muted">No add-ons</span>';
+        const form=s.status==="active"&&addonOptions?`<form class="row" onsubmit="addAddon(event,${s.id})"><select name="item" required>${addonOptions}</select><input name="quantity" type="number" min="1" value="1" aria-label="Add-on quantity"><button class="secondary">Add</button></form><small class="muted">Changes apply to your next invoice.</small>`:"";
+        return `<tr><td>${esc(s.number)}</td><td>${esc(planById[s.plan_id]?.name || "Plan")}</td><td><span class="pill">${esc(s.paused ? "paused" : s.status)}</span></td><td>${esc(s.next_invoice_date || "—")}</td><td><div class="actions">${s.status==="active"&&!s.paused?`<button class="secondary" onclick="transition(${s.id},'pause')">Pause</button><button class="secondary" onclick="transition(${s.id},'renew')">Renew</button>`:""}${s.status==="active"&&s.paused?`<button class="secondary" onclick="transition(${s.id},'resume')">Resume</button>`:""}</div></td><td>${addonText}${form}</td></tr>`;
+      })
+    );
+    $("customer-invoices").innerHTML = `<div class="section-title"><h2>Your invoices</h2></div>` + table(
+      ["Invoice","Status","Due date","Total","Paid",""],
+      invoices.map(i=>`<tr><td>${esc(i.number)}</td><td><span class="pill">${esc(i.status)}</span></td><td>${esc(i.due_date)}</td><td>${esc(i.total)}</td><td>${esc(i.paid_amount)}</td><td><button class="secondary" onclick="printInvoice(${i.id})">View invoice</button></td></tr>`)
+    );
+  } catch(error) { $("customer-subscriptions").innerHTML = `<div class="notice">${esc(error.message)}</div>`; }
+}
+async function loadStaff() {
+  $("customer-subscriptions").hidden = true; $("customer-invoices").hidden = true;
+  $("staff-subscriptions").hidden = false; $("staff-invoices").hidden = false;
+  $("admin-tools").hidden = me.role !== "admin";
+  try {
+    const invoiceStatus=$("invoice-status")?.value||"";
+    const [summary,invoices,subscriptions,customers,plans,products,variants,taxes] = await Promise.all([api("/reports/summary"),api("/invoices"),api("/subscriptions"),api("/customers"),api("/plans"),api("/products"),api("/variants"),api("/taxes")]);
+    $("metrics").innerHTML = Object.entries(summary).map(([key,value])=>`<div class="card"><div class="muted">${esc(key.replaceAll("_"," "))}</div><div class="metric">${esc(value)}</div></div>`).join("");
+    const customersById = Object.fromEntries(customers.map(c=>[c.id,c]));
+    const planOptions=plans.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("");
+    const customerOptions=customers.map(c=>`<option value="${c.id}">${esc(c.email)}</option>`).join("");
+    const productOptions=products.map(p=>`<option value="${p.id}">${esc(p.name)} · ${esc(p.type)}</option>`).join("");
+    const variantOptions=variants.map(v=>`<option value="${v.id}">${esc(v.attribute)}: ${esc(v.value)}</option>`).join("");
+    const taxOptions=taxes.map(t=>`<option value="${t.id}">${esc(t.name)} (${esc(t.rate_pct)}%)</option>`).join("");
+    const planById=Object.fromEntries(plans.map(p=>[p.id,p]));
+    $("staff-subscriptions").innerHTML = `<div class="section-title"><h2>Subscriptions</h2></div><form class="row" onsubmit="createSubscription(event)"><label>Customer<select name="customer_id" required>${customerOptions}</select></label><label>Plan<select name="plan_id" required>${planOptions}</select></label><label>Start date<input name="start_date" type="date" value="${new Date().toISOString().slice(0,10)}" required></label><label>Optional product/add-on<select name="product_id"><option value="">Plan only</option>${productOptions}</select></label><label>Variant<select name="variant_id"><option value="">No variant</option>${variantOptions}</select></label><label>Tax<select name="tax_id"><option value="">No tax</option>${taxOptions}</select></label><label>Quantity<input name="quantity" type="number" min="1" value="1"></label><button ${customers.length&&plans.length?"":"disabled"}>Create subscription</button></form>` + table(
+      ["Subscription","Customer","Plan","Status","Next invoice","Actions"],
+      subscriptions.map(s=>`<tr><td>${esc(s.number)}</td><td>${esc(customersById[s.customer_id]?.email || s.customer_id)}</td><td>${esc(planById[s.plan_id]?.name || s.plan_id)}</td><td><span class="pill">${esc(s.paused?"paused":s.status)}</span></td><td>${esc(s.next_invoice_date || "—")}</td><td><div class="actions">${staffTransitions(s)}</div></td></tr>`)
+    );
+    $("staff-invoices").innerHTML = `<div class="section-title"><h2>Invoices</h2><div class="row"><select id="invoice-status" onchange="loadStaff()"><option value="">All statuses</option><option>draft</option><option>confirmed</option><option>paid</option></select><button onclick="runBilling()">Run billing</button></div></div>` + table(
+      ["Invoice","Customer","Status","Due","Total","Paid","Actions"],
+      invoices.filter(i=>!invoiceStatus||i.status===invoiceStatus).map(i=>`<tr><td>${esc(i.number)}</td><td>${esc(customersById[i.customer_id]?.email || i.customer_id)}</td><td><span class="pill">${esc(i.status)}</span></td><td>${esc(i.due_date)}</td><td>${esc(i.total)}</td><td>${esc(i.paid_amount)}</td><td><div class="actions">${i.status==="draft"?`<button class="secondary" onclick="invoiceAction(${i.id},'confirm')">Confirm</button>`:""}${i.status==="confirmed"?`<button class="secondary" onclick="collectPayment(${i.id})">Record payment</button>`:""}<button class="secondary" onclick="printInvoice(${i.id})">View</button></div></td></tr>`)
+    );
+    $("invoice-status").value=invoiceStatus;
+    if (me.role === "admin") await loadAdminTools();
+  } catch(error) { $("staff-invoices").innerHTML = `<div class="notice">${esc(error.message)}</div>`; }
+}
+async function transition(id, action) {
+  try { await api(`/subscriptions/${id}/transition`,{method:"POST",body:JSON.stringify({to:action})}); await loadCustomer(); }
+  catch(error) { alert(error.message); }
+}
+async function requestSubscription(event) {
+  event.preventDefault();
+  const planId=Number(new FormData(event.currentTarget).get("plan_id"));
+  try {
+    await api("/subscriptions",{method:"POST",body:JSON.stringify({customer_id:me.id,plan_id:planId,start_date:new Date().toISOString().slice(0,10)})});
+    await loadCustomer();
+  } catch(error) { alert(error.message); }
+}
+async function createSubscription(event) {
+  event.preventDefault();const form=event.currentTarget;const data=Object.fromEntries(new FormData(form));data.customer_id=Number(data.customer_id);data.plan_id=Number(data.plan_id);
+  const productId=Number(data.product_id), quantity=Number(data.quantity), variantId=Number(data.variant_id), taxId=Number(data.tax_id);
+  data.lines=productId?[{product_id:productId,quantity,variant_id:variantId||null,tax_id:taxId||null}]:[];
+  delete data.product_id;delete data.quantity;delete data.variant_id;delete data.tax_id;
+  try { await api("/subscriptions",{method:"POST",body:JSON.stringify(data)}); await loadStaff(); }
+  catch(error) { alert(error.message); }
+}
+function staffTransitions(sub) {
+  const next={draft:"quotation",quotation:"confirmed",confirmed:"active",active:"closed"}[sub.status];
+  return `${next?`<button class="secondary" onclick="staffTransition(${sub.id},'${next}')">${esc(next)}</button>`:""}${sub.status==="active"&&!sub.paused?`<button class="secondary" onclick="staffTransition(${sub.id},'pause')">Pause</button>`:""}${sub.status==="active"&&sub.paused?`<button class="secondary" onclick="staffTransition(${sub.id},'resume')">Resume</button>`:""}`;
+}
+async function staffTransition(id, action) {
+  try { await api(`/subscriptions/${id}/transition`,{method:"POST",body:JSON.stringify({to:action})}); await loadStaff(); }
+  catch(error) { alert(error.message); }
+}
+async function addAddon(event, subscriptionId) {
+  event.preventDefault();const data=Object.fromEntries(new FormData(event.currentTarget));const [product_id,variant]=data.item.split(":");
+  try { await api(`/subscriptions/${subscriptionId}/addons`,{method:"POST",body:JSON.stringify({product_id:Number(product_id),variant_id:Number(variant)||null,quantity:Number(data.quantity)})}); await loadCustomer(); }
+  catch(error) { alert(error.message); }
+}
+async function removeAddon(subscriptionId, lineId) {
+  if(!confirm("Remove this add-on starting with the next invoice?")) return;
+  try { await api(`/subscriptions/${subscriptionId}/addons/${lineId}`,{method:"DELETE"}); await loadCustomer(); }
+  catch(error) { alert(error.message); }
+}
+async function collectPayment(invoiceId) {
+  const amount=Number(prompt("Payment amount"));
+  if(!Number.isFinite(amount)||amount<=0) return;
+  const method=prompt("Payment method","bank transfer");
+  if(!method) return;
+  try { await api("/payments",{method:"POST",body:JSON.stringify({invoice_id:invoiceId,amount,method})}); await loadStaff(); }
+  catch(error) { alert(error.message); }
+}
+async function runBilling() {
+  try { const result=await api("/billing/run",{method:"POST"}); alert(`Created ${result.created} invoice(s); skipped ${result.skipped_duplicates} duplicate(s).`); await loadStaff(); }
+  catch(error) { alert(error.message); }
+}
+async function invoiceAction(id, action) {
+  try { await api(`/invoices/${id}/${action}`,{method:"POST"}); await loadStaff(); }
+  catch(error) { alert(error.message); }
+}
+async function printInvoice(id) {
+  const popup=window.open("about:blank","_blank");
+  try {
+    const response=await fetch(`/invoices/${id}/print`,{headers:{Authorization:`Bearer ${token}`}});
+    if(!response.ok) throw new Error("Unable to load invoice.");
+    const html=await response.blob(); popup.location.href=URL.createObjectURL(html);
+  } catch(error) { if(popup) popup.close(); alert(error.message); }
+}
+async function loadAdminTools() {
+  const [products,plans,taxes,discounts,variants]=await Promise.all([api("/products"),api("/plans"),api("/taxes"),api("/discounts"),api("/variants")]);
+  $("admin-tools").innerHTML = `<h2>Administration</h2><div class="split">
+    <div><h2>Products</h2><form onsubmit="createCatalog(event,'products')"><label>Name<input name="name" required></label><label>Type<input name="type" value="service"></label><label>Sales price<input name="sales_price" type="number" step="0.01" min="0" required></label><label>Cost price<input name="cost_price" type="number" step="0.01" min="0" value="0"></label><button>Add product</button></form><div class="muted">${products.map(p=>`${esc(p.name)} · ${esc(p.sales_price)}`).join("<br>")||"No products"}</div></div>
+    <div><h2>Plans</h2><form onsubmit="createCatalog(event,'plans')"><label>Name<input name="name" required></label><label>Price per billing period<input name="price" type="number" step="0.01" min="0" required></label><label>Billing period<select name="billing_period"><option>monthly</option><option>yearly</option><option>weekly</option><option>daily</option></select></label><button>Add plan</button></form><div class="muted">${plans.map(p=>`${esc(p.name)} · ${esc(p.price)} / ${esc(p.billing_period)}`).join("<br>")||"No plans"}</div></div>
+    <div><h2>Product variants</h2><form onsubmit="createCatalog(event,'variants')"><label>Product<select name="product_id" required>${products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label><label>Attribute<input name="attribute" placeholder="e.g. edition" required></label><label>Value<input name="value" placeholder="e.g. enterprise" required></label><label>Extra price<input name="extra_price" type="number" step="0.01" min="0" value="0"></label><button ${products.length?"":"disabled"}>Add variant</button></form><div class="muted">${variants.map(v=>`${esc(products.find(p=>p.id===v.product_id)?.name||"Product")} · ${esc(v.attribute)}: ${esc(v.value)} (+${esc(v.extra_price)})`).join("<br>")||"No variants"}</div></div>
+    <div><h2>Taxes</h2><form onsubmit="createCatalog(event,'taxes')"><label>Name<input name="name" required></label><label>Rate (%)<input name="rate_pct" type="number" step="0.01" min="0" required></label><button>Add tax</button></form><div class="muted">${taxes.map(t=>`${esc(t.name)} · ${esc(t.rate_pct)}%`).join("<br>")||"No taxes"}</div></div>
+    <div><h2>Discounts</h2><form onsubmit="createCatalog(event,'discounts')"><label>Name<input name="name" required></label><label>Kind<select name="kind"><option>percent</option><option>fixed</option></select></label><label>Value<input name="value" type="number" step="0.01" min="0" required></label><button>Add discount</button></form><div class="muted">${discounts.map(d=>`${esc(d.name)} · ${esc(d.value)} ${esc(d.kind)}`).join("<br>")||"No discounts"}</div></div>
+    <div><h2>Invite staff</h2><form onsubmit="addStaff(event)"><label>Name<input name="name"></label><label>Email<input name="email" type="email" required></label><label>Temporary password<input name="password" type="password" minlength="9" required></label><button>Create staff account</button></form></div>
+  </div>`;
+}
+async function createCatalog(event,path) {
+  event.preventDefault(); const form=event.currentTarget; const data=Object.fromEntries(new FormData(form));
+  const numericFields=["product_id","price","sales_price","cost_price","rate_pct","extra_price"];
+  if(path==="discounts") numericFields.push("value");
+  for(const key of numericFields) if(data[key]!==undefined) data[key]=Number(data[key]);
+  try { await api(`/${path}`,{method:"POST",body:JSON.stringify(data)}); await loadAdminTools(); }
+  catch(error) { alert(error.message); }
+}
+async function addStaff(event) {
+  event.preventDefault();const form=event.currentTarget;const data=Object.fromEntries(new FormData(form));
+  try { await api("/staff",{method:"POST",body:JSON.stringify(data)});form.reset();alert("Staff account created."); }
+  catch(error) { alert(error.message); }
+}
+if(resetToken) showAuth("reset");
+else if(token) start();
+</script>
+</body>
+</html>
