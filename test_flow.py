@@ -9,6 +9,7 @@ def test_full_flow(monkeypatch):
     with TestClient(app) as c:
         tok = c.post("/auth/login", json={"email": "admin@brightloop.io", "password": "Admin@12345"}).json()["access_token"]
         H = {"Authorization": f"Bearer {tok}"}
+        assert c.get("/plans", headers=H).json() == []
         assert c.post("/auth/signup", json={"email": "a@b.com", "password": "weak"}).status_code == 422
         cu = c.post("/auth/signup", json={"email": "a@b.com", "password": "Strong#Pass1"}).json()
         assert c.post("/auth/signup", json={"email": "a@b.com", "password": "Strong#Pass1"}).status_code == 409
@@ -34,6 +35,7 @@ def test_full_flow(monkeypatch):
         customer_token = c.post("/auth/login", json={"email": "a@b.com", "password": "Strong#Pass1"}).json()["access_token"]
         customer_headers = {"Authorization": f"Bearer {customer_token}"}
         assert c.get("/auth/me", headers=customer_headers).json()["role"] == "customer"
+        assert [plan["id"] for plan in c.get("/plans", headers=customer_headers).json()] == [pl["id"]]
         visible_products = c.get("/products", headers=customer_headers).json()
         assert visible_products[0]["name"] == "CRM"
         assert "cost_price" not in visible_products[0]
